@@ -5,6 +5,7 @@ import { Routes, Route } from 'react-router';
 import Home from './pages/Home';
 import { Toaster } from 'react-hot-toast';
 import Login from "./pages/Login"
+import AiAgents from "./pages/AiAgents"
 import SignUp from './pages/SignUp'
 function App() {
   return (
@@ -40,6 +41,9 @@ function App() {
            }/>
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
+        <Route path="/aiagents" >
+        <Route index element={<ProtectedRoute><AiAgents/></ProtectedRoute>}/> 
+        </Route>
       </Routes>
     </AuthProvider>
     </div>
