@@ -1,5 +1,6 @@
 {
   "name": "shared",
+  "type": "module",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -10,6 +11,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "dotenv": "^16.4.7",
     "mongoose": "^8.13.1"
   }
 }
