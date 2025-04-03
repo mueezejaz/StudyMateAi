@@ -9,12 +9,18 @@ export const SighUpUser = async (req, res, next) => {
         if (!username || !email || !password) {
             throw new ApiError(400, "Username, email, and password are required");
         }
-        let user = new User({name:username,email,password})
-        await user.save()
-        delete user.password
-        return res.status(201).json(new ApiResponce(201,{user},"Id is created successfully"))
+
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            throw new ApiError(409, "Email already exists. Please use a different email.");
+        }
+
+        const newUser = await User.create({ username, email, password });
+
+        return res.status(201).json(new ApiResponse(201, newUser, "User registered successfully"));
+
     } catch (error) {
-        next(error); 
+        next(error);
     }
-};
+};;
 
