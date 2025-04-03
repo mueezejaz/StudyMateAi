@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 import axios from 'axios';
+import { toast } from 'react-hot-toast';
 
 const SignUp = () => {
   const { register, handleSubmit, formState: { errors }, reset } = useForm();
@@ -9,7 +10,6 @@ const SignUp = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const onSubmit = async (data) => {
-    console.log(data)
     setIsLoading(true);
     try {
       const response = await axios.post('http://localhost:8000/api/user/signup', {
@@ -19,15 +19,15 @@ const SignUp = () => {
       });
       
       if (response.data.success) {
-        alert('Sign up successful!');
+        toast.success('Sign up successful!');
         reset();
-        navigate('/');
+        navigate('/login');
       } else {
-        alert(`Error: ${response.data.message}`);
+        toast.error(response.data.message || 'Something went wrong');
       }
     } catch (error) {
       console.error('Sign up failed:', error);
-      alert(error.response?.data?.message || 'Failed to sign up. Please try again later.');
+      toast.error(error.response?.data?.message || 'Failed to sign up. Please try again later.');
     } finally {
       setIsLoading(false);
     }
@@ -112,3 +112,4 @@ const SignUp = () => {
 };
 
 export default SignUp;
+

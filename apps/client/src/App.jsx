@@ -1,4 +1,6 @@
 import React from 'react';
+import { AuthProvider } from './context/Auth';
+import ProtectedRoute from './components/ProtectedRoute';
 import { Routes, Route } from 'react-router';
 import Home from './pages/Home';
 import { Toaster } from 'react-hot-toast';
@@ -7,6 +9,7 @@ import SignUp from './pages/SignUp'
 function App() {
   return (
     <div>
+  <AuthProvider>
     <Toaster 
         position="top-right" 
         toastOptions={{
@@ -30,10 +33,15 @@ function App() {
         }}
       />
       <Routes>
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={
+        <ProtectedRoute>
+          <Home/>
+        </ProtectedRoute>
+           }/>
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
       </Routes>
+    </AuthProvider>
     </div>
   );
 }

@@ -25,7 +25,15 @@ export const SignUpUser = async (req, res, next) => {
         next(error);
     }
 };
-
+export const getCurrentUser = async (req, res, next) => {
+  try {
+    return res.status(200).json(
+      new ApiResponse(200, { user: req.user }, "User retrieved successfully")
+    );
+  } catch (error) {
+    next(error);
+  }
+};
 export const LoginUser = async (req, res, next) => {
     try {
         const { email, password } = req.body;
