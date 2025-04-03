@@ -2,12 +2,21 @@
   "name": "studymateai",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
- "workspaces": ["apps/*", "packages/*"],
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+ "workspaces": [
+    "apps/server",
+    "apps/worker",
+    "packages/shared"
+  ],
+  "scripts": { 
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "husky"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "prettier": "^3.5.3",
+    "pretty-quick": "^4.1.1"
+  }
 }
