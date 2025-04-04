@@ -1,3 +1,4 @@
+import { MongoClient } from "mongodb";
 import Agent from "../models/model.agent.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponce.js";
@@ -158,7 +159,6 @@ export const updateFileStatus = async (req, res, next) => {
   }
 };
 
-// Delete a file
 export const deleteFile = async (req, res, next) => {
   try {
     const { agentId, fileId } = req.params;
@@ -186,19 +186,45 @@ export const deleteFile = async (req, res, next) => {
       throw new ApiError(404, "File not found");
     }
     
-    const filePath = agent.files[fileIndex].path;
+    const file = agent.files[fileIndex];
+    
+    // Check if the file is still processing
+    if (file.status === 'processing') {
+      throw new ApiError(409, "Cannot delete file while it's being processed");
+    }
     
     // Remove file from agent
     agent.files.splice(fileIndex, 1);
     await agent.save();
     
-    // Delete file from disk
-    try {
-      fs.unlinkSync(filePath);
-    } catch (err) {
-      console.error("Error deleting file:", err);
-      // Continue even if file deletion fails
+    // If file is completed, clean up vectors from the database
+    if (file.status === 'completed') {
+      try {
+        // Connect to MongoDB
+        const client = new MongoClient(process.env.MONGODB_ATLAS_URI);
+        await client.connect();
+        
+        const collection = client
+          .db(process.env.MONGODB_ATLAS_DB_NAME)
+          .collection(process.env.MONGODB_ATLAS_COLLECTION_NAME);
+        
+        // Delete vectors for this file
+        // We're using the metadata.fileName and metadata.agentId fields that were added during processing
+        await collection.deleteMany({
+          "agentId": agentId,
+          "fileName": file.filename
+        });
+        
+        await client.close();
+        console.log(`Vectors for file ${file.filename} deleted successfully`);
+      } catch (dbError) {
+        console.error("Error deleting vectors:", dbError);
+        // Continue even if vector deletion fails
+        // This is a soft error that shouldn't prevent the file from being deleted
+      }
     }
+    
+    // Note: We don't need to delete the physical file anymore as it's already deleted by the worker after processing
     
     return res.status(200).json(
       new ApiResponse(200, {}, "File deleted successfully")
