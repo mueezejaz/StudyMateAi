@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router';
 import toast from 'react-hot-toast';
 import axios from 'axios';
-
+import { useAuth } from '../context/Auth';
 const Login = () => {
   const [formData, setFormData] = useState({
     email: '',
@@ -10,7 +10,7 @@ const Login = () => {
   });
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-
+  let {setUser} = useAuth();
   const handleChange = (e) => {
     setFormData({
       ...formData,
@@ -30,6 +30,8 @@ const Login = () => {
       );
       
       toast.success(response.data.message || 'Login successful!');
+      console.log(response.data.data.user)
+      setUser(response.data.data.user)
       navigate('/'); // Redirect to home page
     } catch (error) {
       const errorMessage = error.response?.data?.message || 'Login failed. Please try again.';
