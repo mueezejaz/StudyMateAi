@@ -16,9 +16,11 @@ app.use(cors({
 
 // Import routes
 import UserRouter from "./routes/route.user.js";
+import AgentRouter from "./routes/route.agent.js";
 
 // Routes
 app.use("/api/user", UserRouter);
+app.use("/api/agent", AgentRouter);
 app.use(errorHandler);
 
 app.get('/test', async(req, res) => {
