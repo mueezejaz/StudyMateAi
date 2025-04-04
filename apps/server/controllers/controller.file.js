@@ -65,7 +65,8 @@ export const uploadFiles = async (req, res, next) => {
         const job = Queue.createJob({
           agentId: agent._id.toString(),
           filePath: file.path,
-          fileType: fileRecord.fileType
+          fileType: fileRecord.fileType,
+          orignalFileName:file.originalname
         });
         
         await job.save();

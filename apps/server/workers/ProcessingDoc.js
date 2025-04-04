@@ -42,19 +42,27 @@ function deleteFile(filePath) {
   }
 }
 
-// Extract fileId from filename
-function getFileIdFromPath(filePath) {
-  const filename = path.basename(filePath);
-  // Assuming filename format is like "files-12345678-123456789.pdf"
-  // We need to extract the ObjectId from the filename
-  const parts = filename.split('-');
-  if (parts.length >= 3) {
-    return parts[1]; // This might need adjustment based on your actual filename format
+// Find file by Id in an agent
+async function findFileById(agentId, fileId) {
+  try {
+    const agent = await Agent.findById(agentId);
+    if (!agent) {
+      throw new Error(`Agent not found: ${agentId}`);
+    }
+    
+    const file = agent.files.id(fileId);
+    if (!file) {
+      throw new Error(`File not found in agent: ${fileId}`);
+    }
+    
+    return file;
+  } catch (error) {
+    console.error(`Error finding file: ${error.message}`);
+    return null;
   }
-  return null;
 }
 
-async function processPDFDocument(filePath) {
+async function processPDFDocument(agentId,filePath,orignalFileName) {
   try {
     // Load environment variables
     
@@ -104,7 +112,9 @@ async function processPDFDocument(filePath) {
       let pageText = page.markdown;
       let metadata = {
         pageNumber: page.index,
-        fileName: fileName
+        agentId,
+        orignalFileName,
+        fileName 
       };
       const splits = await splitter.splitDocuments([new Document({ pageContent: pageText, metadata })]);
       allSplits.push(...splits);
@@ -148,7 +158,7 @@ async function processPDFDocument(filePath) {
 }
 
 // Process image files (PNG, JPG)
-async function processImageDocument(filePath) {
+async function processImageDocument(agentId,filePath) {
   try {
     // Similar implementation to processPDFDocument but for images
     // You could use Mistral's OCR for images as well
@@ -168,16 +178,24 @@ const setupWorker = async () => {
     return;
   }
 
-  queue.process(async (job) => {
-    const { agentId, filePath, fileType } = job.data;
+  queue.process(2,async (job) => {
+    const { agentId, filePath, fileType,orignalFileName } = job.data;
     console.log(`Processing file: ${filePath} (${fileType}) for agent: ${agentId}`);
     
     try {
-      // Extract fileId from filename or path
-      const fileId = getFileIdFromPath(filePath);
-      if (!fileId) {
-        throw new Error("Could not extract file ID from path");
+      // Find the file in the database to get the correct fileId
+      const agent = await Agent.findById(agentId);
+      if (!agent) {
+        throw new Error(`Agent not found: ${agentId}`);
       }
+      
+      // Find the file by matching the path
+      const file = agent.files.find(f => f.path === filePath);
+      if (!file) {
+        throw new Error(`File not found in agent with path: ${filePath}`);
+      }
+      
+      const fileId = file._id;
       
       // Update status to processing
       await updateFileStatus(agentId, fileId, "processing");
@@ -185,7 +203,7 @@ const setupWorker = async () => {
       // Process based on file type
       let success = false;
       if (fileType === 'pdf') {
-        success = await processPDFDocument(agentId,filePath);
+        success = await processPDFDocument(agentId,filePath,orignalFileName);
       } else if (['png', 'jpg', 'jpeg'].includes(fileType)) {
         success = await processImageDocument(filePath);
       } else {
@@ -206,9 +224,12 @@ const setupWorker = async () => {
       
       // Try to update status to failed
       try {
-        const fileId = getFileIdFromPath(filePath);
-        if (fileId) {
-          await updateFileStatus(agentId, fileId, "failed");
+        const agent = await Agent.findById(agentId);
+        if (agent) {
+          const file = agent.files.find(f => f.path === filePath);
+          if (file) {
+            await updateFileStatus(agentId, file._id, "failed");
+          }
         }
       } catch (statusError) {
         console.error("Failed to update file status:", statusError);
