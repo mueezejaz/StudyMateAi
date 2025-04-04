@@ -20,6 +20,7 @@ app.use(cors({
 // Import routes
 import UserRouter from "./routes/route.user.js";
 import AgentRouter from "./routes/route.agent.js";
+import { setupWorker } from "./workers/ProcessingDoc.js";
 
 // Routes
 app.use("/api/user", UserRouter);
@@ -36,4 +37,5 @@ app.get('/test', async(req, res) => {
 app.listen(8000, () => {
     console.log("Server is running on port 8000");
     db_connect();
+    setupWorker();
 });

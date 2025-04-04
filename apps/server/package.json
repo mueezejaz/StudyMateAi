@@ -13,6 +13,7 @@
   "license": "ISC",
   "dependencies": {
     "bcrypt": "^5.1.1",
+    "bee-queue": "^1.7.1",
     "bull": "^4.16.5",
     "bullmq": "^5.46.1",
     "cookie-parser": "^1.4.7",

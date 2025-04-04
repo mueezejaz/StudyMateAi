@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect,useRef } from "react";
 import { useParams, useNavigate } from "react-router";
 import { Upload, FileText, Image, X, AlertCircle, CheckCircle, Loader } from "lucide-react";
 import axios from "axios";
@@ -15,6 +15,7 @@ export default function AddDataToAgent() {
   const [files, setFiles] = useState([]);
   const [uploadStatus, setUploadStatus] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef(null); // Ref for file input
 
   // Fetch agent data
   useEffect(() => {
@@ -36,7 +37,7 @@ export default function AddDataToAgent() {
         setLoading(false);
       }
     };
-    console.log(agentId)
+
     if (agentId) {
       fetchAgent();
     }
@@ -122,6 +123,11 @@ export default function AddDataToAgent() {
       // Add new files to the existing files list
       setFiles(prevFiles => [...prevFiles, ...response.data.data.files]);
       toast.success("Files uploaded successfully");
+
+      // Reset the file input after successful upload
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""; // Clear the file input
+      }
     } catch (error) {
       toast.error(error.response?.data?.message || "Failed to upload files");
     } finally {
@@ -207,6 +213,7 @@ export default function AddDataToAgent() {
               multiple 
               className="hidden" 
               onChange={handleFileChange}
+              ref={fileInputRef} // Add ref here
               disabled={uploadStatus}
             />
           </label>
@@ -221,70 +228,72 @@ export default function AddDataToAgent() {
         )}
 
         {/* Files List */}
-        {files.length > 0 ? (
-          <div>
-            <h2 className="text-xl font-semibold mb-4">Uploaded Files</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {files.map((file) => (
-                <div key={file._id} className="bg-gray-800 rounded-lg p-4 flex flex-col">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center">
-                      {file.fileType === 'pdf' ? (
-                        <FileText className="w-8 h-8 text-red-400 mr-3" />
-                      ) : (
-                        <Image className="w-8 h-8 text-green-400 mr-3" />
-                      )}
-                      <div className="truncate max-w-xs">
-                        <p className="font-medium truncate">{file.originalName}</p>
-                        <p className="text-sm text-gray-400">{new Date(file.uploadedAt).toLocaleString()}</p>
-                      </div>
-                    </div>
-                    {(user && agent.admin === user._id) && (
-                      <button 
-                        onClick={() => handleDeleteFile(file._id)}
-                        className="text-gray-400 hover:text-red-400"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    )}
-                  </div>
-                  <div className="mt-auto pt-2 border-t border-gray-700">
-                    <div className="flex items-center">
-                      {file.status === 'processing' && (
-                        <>
-                          <Loader className="w-4 h-4 text-yellow-500 animate-spin mr-2" />
-                          <span className="text-sm text-yellow-500">Processing...</span>
-                        </>
-                      )}
-                      {file.status === 'completed' && (
-                        <>
-                          <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
-                          <span className="text-sm text-green-500">Processed</span>
-                        </>
-                      )}
-                      {file.status === 'failed' && (
-                        <>
-                          <AlertCircle className="w-4 h-4 text-red-500 mr-2" />
-                          <span className="text-sm text-red-500">Failed</span>
-                        </>
-                      )}
-                      {file.status === 'uploaded' && (
-                        <>
-                          <CheckCircle className="w-4 h-4 text-blue-500 mr-2" />
-                          <span className="text-sm text-blue-500">Uploaded</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
+{files.length > 0 ? (
+  <div>
+    <h2 className="text-xl font-semibold mb-4">Uploaded Files</h2>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {files.map((file) => (
+        <div key={file._id} className="bg-gray-800 rounded-lg p-4 flex flex-col">
+          <div className="flex items-start justify-between mb-2">
+            <div className="flex max-w-[90%] items-center">
+              {file.fileType === 'pdf' ? (
+                <FileText className="w-[20%] h-[20%] text-red-400 mr-3" />
+              ) : (
+                <Image className="w-8 h-8 text-green-400 mr-3" />
+              )}
+              <div className="truncate max-w-xs">
+                <p className="font-medium truncate">{file.originalName}</p>
+                <p className="text-sm text-gray-400">{new Date(file.uploadedAt).toLocaleString()}</p>
+              </div>
+            </div>
+            {(user && agent.admin === user._id) && (
+              <button 
+                onClick={() => handleDeleteFile(file._id)}
+                className="text-gray-400 hover:text-red-400 ml-auto"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+          <div className="mt-auto pt-2 border-t border-gray-700">
+            <div className="flex items-center">
+              {file.status === 'processing' && (
+                <>
+                  <Loader className="w-4 h-4 text-yellow-500 animate-spin mr-2" />
+                  <span className="text-sm text-yellow-500">Processing...</span>
+                </>
+              )}
+              {file.status === 'completed' && (
+                <>
+                  <CheckCircle className="w-4 h-4 text-green-500 mr-2" />
+                  <span className="text-sm text-green-500">Processed</span>
+                </>
+              )}
+              {file.status === 'failed' && (
+                <>
+                  <AlertCircle className="w-4 h-4 text-red-500 mr-2" />
+                  <span className="text-sm text-red-500">Failed</span>
+                </>
+              )}
+              {file.status === 'uploaded' && (
+                <>
+                  <CheckCircle className="w-4 h-4 text-blue-500 mr-2" />
+                  <span className="text-sm text-blue-500">Uploaded</span>
+                </>
+              )}
             </div>
           </div>
-        ) : (
-          <div className="bg-gray-800 p-6 rounded-lg text-center">
-            <p className="text-gray-400">No files uploaded yet. Add files to enhance your AI agent.</p>
-          </div>
-        )}
+        </div>
+      ))}
+    </div>
+  </div>
+) : (
+  <div className="bg-gray-800 p-6 rounded-lg text-center">
+    <p className="text-gray-400">No files uploaded yet. Add files to enhance your AI agent.</p>
+  </div>
+)}
+
+
       </div>
     </div>
   );

@@ -3,14 +3,9 @@ import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponce.js";
 import path from "path";
 import fs from "fs";
-import Queue from "bull";
-import GetQueue from "../utils/Queue.js";
-// Create a Bull queue for file processing
-let fileProcessingQueue;
+import Queue from "../utils/Queue.js";
+// Initialize queue
 
-(async () => {
-  fileProcessingQueue = await GetQueue();
-})();
 // Upload files to an agent
 export const uploadFiles = async (req, res, next) => {
   try {
@@ -26,7 +21,7 @@ export const uploadFiles = async (req, res, next) => {
     if (!agent) {
       throw new ApiError(404, "Agent not found");
     }
-   console.log(agent.sharedWith) 
+    
     // Verify the current user is the admin or has share access
     const isAdmin = agent.admin.toString() === req.user._id.toString();
     const isShared = agent.sharedWith.some(id => id.toString() === req.user._id.toString());
@@ -52,7 +47,7 @@ export const uploadFiles = async (req, res, next) => {
         continue; // Skip this file
       }
       
-      // Create file reucord
+      // Create file record
       const fileRecord = {
         filename: file.filename,
         originalName: file.originalname,
@@ -64,14 +59,20 @@ export const uploadFiles = async (req, res, next) => {
       // Add file to agent
       agent.files.push(fileRecord);
       uploadedFiles.push(fileRecord);
-      // Add file to processing queue
       
-    //   await fileProcessingQueue.add({
-    //     agentId: agent._id.toString(),
-    //    // fileId: fileRecord._id.toString(),
-    //     filePath: file.path,
-    //     fileType: fileRecord.fileType
-    //   });
+      // Add file to processing queue if queue is available
+      if (Queue) {
+        const job = Queue.createJob({
+          agentId: agent._id.toString(),
+          filePath: file.path,
+          fileType: fileRecord.fileType
+        });
+        
+        await job.save();
+        console.log(`Job ${job.id} created for file ${file.filename}`);
+      } else {
+        console.warn("Queue not available, file will not be processed automatically");
+      }
     }
     
     // Save the updated agent
@@ -84,6 +85,8 @@ export const uploadFiles = async (req, res, next) => {
     next(error);
   }
 };
+
+// Rest of your controller code remains the same
 
 // Get all files for an agent
 export const getFiles = async (req, res, next) => {

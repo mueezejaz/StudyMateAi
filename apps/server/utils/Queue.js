@@ -1,4 +1,4 @@
-import {Queue} from 'bullmq';
+import Bee from 'bee-queue';
 import Redis from "ioredis"
 
 const redisUrl = process.env.RADIS_URI; // Get this from Upstash console
@@ -8,13 +8,26 @@ const GetQueue  = async ()=>{
     try {
         const connection = new Redis(redisUrl);
         await connection.set('foo', 'bar');
-        const myQueue = new Queue("file-processing",{
-           connection 
-        });
-        return myQueue
-    } catch (error) {
-       console.log('error in getting queue',error) 
-    }
+        const queue = new Bee('file-processing', {
+        redis: redisUrl,
+        isWorker: true,
+        removeOnSuccess: true
+    });
+    
+    // Set up event listeners for the queue
+    queue.on('ready', () => {
+      console.log('Queue is ready to process jobs');
+    });
+    
+    queue.on('error', (err) => {
+      console.error('Queue error:', err);
+    });
+    
+    return queue;
+  } catch (error) {
+    console.error('Error setting up queue:', error);
+    throw error;
+  }
 }
-
-export default GetQueue
+const _getQueue = await GetQueue()
+export default _getQueue
