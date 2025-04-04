@@ -1,4 +1,4 @@
-import Agent from "../models/mode.agent.js";
+import Agent from "../models/model.agent.js";
 import User from "../models/model.user.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponce.js";
@@ -148,6 +148,38 @@ export const deleteAgent = async (req, res, next) => {
     
     return res.status(200).json(
       new ApiResponse(200, {}, "Agent deleted successfully")
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Get a single agent by id
+export const getAgentById = async (req, res, next) => {
+  try {
+    const { agentId } = req.params;
+    
+    if (!agentId) {
+      throw new ApiError(400, "Agent ID is required");
+    }
+    
+    // Find the agent
+    const agent = await Agent.findById(agentId);
+    
+    if (!agent) {
+      throw new ApiError(404, "Agent not found");
+    }
+    
+    // Verify the current user is the admin or has share access
+    const isAdmin = agent.admin.toString() === req.user._id.toString();
+    const isShared = agent.sharedWith.some(id => id.toString() === req.user._id.toString());
+    
+    if (!isAdmin && !isShared) {
+      throw new ApiError(403, "You don't have permission to view this agent");
+    }
+    
+    return res.status(200).json(
+      new ApiResponse(200, { agent }, "Agent retrieved successfully")
     );
   } catch (error) {
     next(error);

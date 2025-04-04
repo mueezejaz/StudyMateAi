@@ -2,8 +2,11 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import { db_connect } from "../../packages/shared/db.connect.js";
+import dotenv from 'dotenv'
 import errorHandler from "./utils/ErrorHandler.js";
-
+dotenv.config({
+    path:'./.env'
+})
 const app = express();
 
 // Middleware
