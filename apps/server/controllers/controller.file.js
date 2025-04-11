@@ -62,11 +62,18 @@ export const uploadFiles = async (req, res, next) => {
       uploadedFiles.push(fileRecord);
       
       // Add file to processing queue if queue is available
-      if (Queue) {
-        const job = Queue.createJob({
+    }
+    
+    // Save the updated agent
+    await agent.save();
+    
+        for (const file of req.files) {
+        if (Queue) {
+          const job = Queue.createJob({
           agentId: agent._id.toString(),
           filePath: file.path,
-          fileType: fileRecord.fileType,
+          fileType: "pdf",
+          filename: file.filename,
           orignalFileName:file.originalname
         });
         
@@ -75,11 +82,7 @@ export const uploadFiles = async (req, res, next) => {
       } else {
         console.warn("Queue not available, file will not be processed automatically");
       }
-    }
-    
-    // Save the updated agent
-    await agent.save();
-    
+        }
     return res.status(200).json(
       new ApiResponse(200, { files: uploadedFiles }, "Files uploaded successfully")
     );
