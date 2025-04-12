@@ -39,12 +39,12 @@ function App() {
         <Route path="/" element={
           <Home/>
            }/>
-        <Route path="/chat" element={< Chat/>} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/aiagents" >
         <Route index element={<ProtectedRoute><AiAgents/></ProtectedRoute>}/> 
         <Route path='addata/:agentId' element = {<AddDataToAgent/>} />
+          <Route path=":agentid/chat/:chatid" element={< Chat/>} />
         </Route>
       </Routes>
     </AuthProvider>
