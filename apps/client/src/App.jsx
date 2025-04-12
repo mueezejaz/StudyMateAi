@@ -7,6 +7,7 @@ import { Toaster } from 'react-hot-toast';
 import Login from "./pages/Login"
 import AddDataToAgent from './pages/AddDataToAgent';
 import AiAgents from "./pages/AiAgents"
+import Chat from './pages/Chat';
 import SignUp from './pages/SignUp'
 function App() {
   return (
@@ -38,11 +39,12 @@ function App() {
         <Route path="/" element={
           <Home/>
            }/>
+        <Route path="/chat" element={< Chat/>} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/aiagents" >
         <Route index element={<ProtectedRoute><AiAgents/></ProtectedRoute>}/> 
-        <Route path=':agentId' element = {<AddDataToAgent/>} />
+        <Route path='addata/:agentId' element = {<AddDataToAgent/>} />
         </Route>
       </Routes>
     </AuthProvider>

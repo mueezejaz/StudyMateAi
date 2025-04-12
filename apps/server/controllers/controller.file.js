@@ -61,12 +61,11 @@ export const uploadFiles = async (req, res, next) => {
       agent.files.push(fileRecord);
       uploadedFiles.push(fileRecord);
       
-      // Add file to processing queue if queue is available
     }
     
     // Save the updated agent
     await agent.save();
-    
+    // adding file to the queue 
         for (const file of req.files) {
         if (Queue) {
           const job = Queue.createJob({

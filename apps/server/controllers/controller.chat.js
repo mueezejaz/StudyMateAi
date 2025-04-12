@@ -4,33 +4,92 @@ import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponce.js";
 import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
+import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
+import { MongoDBAtlasVectorSearch } from "@langchain/mongodb";
 import { v4 as uuidv4 } from "uuid";
+import env_config from "../config/env.config.js";
 import { 
-  START, 
-  END, 
   MessagesAnnotation, 
   StateGraph, 
-  MemorySaver 
+  MemorySaver,
 } from "@langchain/langgraph";
-import { InMemoryStore } from "@langchain/langgraph";
+import { 
+  ToolNode
+} from "@langchain/langgraph/prebuilt";
+import { toolsCondition } from "@langchain/langgraph/prebuilt";
+import { z } from "zod";
+import { tool } from "@langchain/core/tools";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { 
   HumanMessage, 
   AIMessage, 
-  SystemMessage 
+  SystemMessage,
+  ToolMessage 
 } from "@langchain/core/messages";
-
-dotenv.config();
-
 // Initialize LLM (Google Gemini)
 const llm = new ChatGoogleGenerativeAI({
   model: "gemini-1.5-flash",
-  apiKey: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+  apiKey:env_config.get("GOOGLE_APPLICATION_CREDENTIALS"), 
   temperature: 0.2,
 });
 
 // Initialize memory store for LangGraph
-const memoryStore = new InMemoryStore();
+const checkpointer = new MemorySaver();
+
+// Define the retrieve tool
+const retrieveSchema = z.object({ query: z.string() });
+
+const buildRetrieveTool = (agentId) => {
+  return tool(
+    async ({ query }) => {
+      try {
+        // Connect to MongoDB Atlas Vector Database
+        const client = new MongoClient(env_config.get("MONGODB_ATLAS_URI"));
+        await client.connect();
+        
+        const collection = client
+          .db(env_config.get("MONGODB_ATLAS_DB_NAME"))
+          .collection(env_config.get("MONGODB_ATLAS_COLLECTION_NAME"));
+        
+        // Initialize embedding model
+        const embeddings = new GoogleGenerativeAIEmbeddings({
+          model: "text-embedding-004",
+          apiKey:env_config.get("GOOGLE_APPLICATION_CREDENTIALS"), 
+        });
+
+        // Initialize Vector Store
+        const vectorStore = new MongoDBAtlasVectorSearch(embeddings, {
+          collection: collection,
+          indexName: "vector_index",
+          textKey: "text",
+          embeddingKey: "embedding",
+        });
+        
+        // Perform similarity search with filter for this agent
+        const retrievedDocs = await vectorStore.similaritySearch(query, 3, {
+          agentId: agentId.toString()
+        });
+        
+        await client.close();
+        
+        // Format the results
+        const serialized = retrievedDocs
+          .map(doc => `Source: ${doc.metadata.source || 'Unknown'}\nContent: ${doc.pageContent}`)
+          .join("\n\n");
+        
+        return serialized;
+      } catch (error) {
+        console.error("Error retrieving context:", error);
+        return "Error retrieving documents. No context available.";
+      }
+    },
+    {
+      name: "retrieve",
+      description: "Retrieve information related to the user's query.",
+      schema: retrieveSchema,
+    }
+  );
+};
 
 // Create a new chat
 export const createChat = async (req, res, next) => {
@@ -79,8 +138,8 @@ export const createChat = async (req, res, next) => {
   }
 };
 
-// Helper function to get chat history from MongoDB
-const getChatHistory = (messages) => {
+// Helper function to convert MongoDB messages to LangChain message format
+const convertToLangChainMessages = (messages) => {
   return messages.map(msg => {
     if (msg.role === 'user') {
       return new HumanMessage(msg.content);
@@ -92,77 +151,6 @@ const getChatHistory = (messages) => {
     return null;
   }).filter(msg => msg !== null);
 };
-
-// Helper function to get embeddings
-async function getEmbedding(text) {
-  try {
-    // This is a simplified approach - in production you should use a proper embedding model
-    const response = await fetch(`${process.env.EMBEDDING_API_URL}/embeddings`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.EMBEDDING_API_KEY}`
-      },
-      body: JSON.stringify({ input: text })
-    });
-    
-    const data = await response.json();
-    return data.data[0].embedding;
-  } catch (error) {
-    console.error("Error getting embedding:", error);
-    throw error;
-  }
-}
-
-// Function to retrieve context from vector DB
-async function getRelevantContext(message, agentId) {
-  try {
-    // Connect to MongoDB Atlas Vector Database
-    const client = new MongoClient(process.env.MONGODB_ATLAS_URI);
-    await client.connect();
-    
-    const collection = client
-      .db(process.env.MONGODB_ATLAS_DB_NAME)
-      .collection(process.env.MONGODB_ATLAS_COLLECTION_NAME);
-    
-    // Get embedding for the message
-    const embedding = await getEmbedding(message);
-    
-    // Perform vector search
-    const searchResults = await collection.aggregate([
-      {
-        $search: {
-          index: "default",
-          knnBeta: {
-            vector: embedding,
-            path: "embedding",
-            k: 5,
-            filter: {
-              agentId: agentId.toString()
-            }
-          }
-        }
-      },
-      {
-        $project: {
-          _id: 0,
-          text: 1,
-          score: { $meta: "searchScore" }
-        }
-      }
-    ]).toArray();
-    
-    await client.close();
-    
-    // Combine the results into a single context string
-    return searchResults
-      .map(result => result.text)
-      .join("\n\n");
-  } catch (error) {
-    console.error("Error retrieving context:", error);
-    return ""; // Return empty context on error
-  }
-}
 
 // Get all chats for a user
 export const getChats = async (req, res, next) => {
@@ -210,7 +198,7 @@ export const getChatById = async (req, res, next) => {
   }
 };
 
-// Send a message and get a response using LangGraph
+// Send a message and get a response using LangGraph conversational RAG pattern
 export const sendMessage = async (req, res, next) => {
   try {
     const { chatId } = req.params;
@@ -254,55 +242,116 @@ export const sendMessage = async (req, res, next) => {
       chat.threadId = threadId;
     }
     
-    // Get relevant context from documents
-    const context = await getRelevantContext(message, chat.agentId);
+    // Create the retrieve tool for this agent
+    const retrieveTool = buildRetrieveTool(chat.agentId);
     
-    // Create LangGraph workflow
-    const checkpointer = new MemorySaver();
+    // Define the LangGraph workflow nodes
     
-    // Define the node function that will process messages
-    const processMessage = async (state) => {
-      // Convert existing chat history to LangChain message format
-      const history = getChatHistory(chat.messages.slice(0, -1)); // Exclude the newest message
+    // Step 1: Generate an AIMessage that may include a tool-call
+    const queryOrRespond = async (state) => {
+      // Get chat history from messages
+      const chatHistory = convertToLangChainMessages(chat.messages);
       
-      // Create system message with context
+      // System prompt with agent instructions
       const systemMessage = new SystemMessage(
-        `You are a helpful AI assistant. Answer questions based on the following context:\n\n${context}\n\n` +
-        `If you cannot find the answer in the context, say so politely. Be concise but thorough.`
+        `You are a helpful AI assistant named ${agent.name}. ${agent.description || ''}\n` +
+        `Answer questions based on the knowledge you have access to through the retrieve tool.\n` +
+        `If you cannot find the answer, say so politely. Be concise but thorough.\n` +
+        `Always use the retrieve tool when the user asks something that requires specific information.`
       );
       
-      // Prepare messages for the LLM
-      const newUserMessage = new HumanMessage(message);
-      const messages = [systemMessage, ...history, newUserMessage];
+      // Bind the retrieve tool to the LLM
+      const llmWithTools = llm.bindTools([retrieveTool]);
       
-      // Call the LLM
-      const response = await llm.invoke(messages);
+      // Prepare the message list with system message and chat history
+      const messages = [systemMessage, ...chatHistory];
+      
+      // Call the LLM with tools
+      const response = await llmWithTools.invoke(messages);
       
       return { messages: [response] };
     };
     
-    // Build the graph
-    const workflow = new StateGraph(MessagesAnnotation)
-      .addNode("process", processMessage)
-      .addEdge(START, "process")
-      .addEdge("process", END);
+    // Step 2: Execute the retrieval
+    const tools = new ToolNode([retrieveTool]);
     
-    const app = workflow.compile({ checkpointer });
+    // Step 3: Generate the final response with retrieved context
+    const generateResponse = async (state) => {
+      // Get most recent tool messages
+      let recentToolMessages = [];
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        let message = state.messages[i];
+        if (message instanceof ToolMessage) {
+          recentToolMessages.push(message);
+        } else {
+          break;
+        }
+      }
+      let toolMessages = recentToolMessages.reverse();
+      
+      // Format retrieved context
+      const context = toolMessages.map(msg => msg.content).join("\n\n");
+      
+      // Chat history (excluding tool messages)
+      const chatHistory = convertToLangChainMessages(chat.messages);
+      
+      // Updated system message with retrieved context
+      const systemMessageContent = 
+        `You are a helpful AI assistant named ${agent.name}. ${agent.description || ''}\n` +
+        `Use the following retrieved information to answer the user's question:\n\n` +
+        `${context}\n\n` +
+        `If you cannot find the answer in the retrieved information, say so politely. Be concise but thorough.`;
+      
+      // Prepare messages for final response
+      const promptMessages = [
+        new SystemMessage(systemMessageContent),
+        ...chatHistory
+      ];
+      
+      // Generate the final response
+      const response = await llm.invoke(promptMessages);
+      
+      return { messages: [response] };
+    };
+    
+    // Build the graph - using the conversational RAG pattern from the tutorial
+    const graphBuilder = new StateGraph(MessagesAnnotation)
+      .addNode("queryOrRespond", queryOrRespond)
+      .addNode("tools", tools)
+      .addNode("generateResponse", generateResponse)
+      .addEdge("__start__", "queryOrRespond")
+      .addConditionalEdges("queryOrRespond", toolsCondition, {
+        "__end__": "__end__",
+        "tools": "tools",
+      })
+      .addEdge("tools", "generateResponse")
+      .addEdge("generateResponse", "__end__");
+    
+    // Compile the graph with the memory checkpointer
+    const workflow = graphBuilder.compile({ checkpointer });
     
     // Set up config with thread ID
-    const config = { configurable: { thread_id: threadId } };
+    const config = { 
+      configurable: { thread_id: threadId },
+      recursionLimit: 10 // Prevent infinite loops
+    };
     
-    // Invoke the workflow
-    const input = [{ role: "user", content: message }];
-    const output = await app.invoke({ messages: input }, config);
+    // Convert new user message to LangChain format for the workflow input
+    const input = { 
+      messages: [new HumanMessage(message)]
+    };
     
-    // Extract the response
-    const aiResponse = output.messages[output.messages.length - 1].content;
+    // Execute the workflow
+    const result = await workflow.invoke(input, config);
+    
+    // Extract the final AI response
+    const lastMessage = result.messages[result.messages.length - 1];
+    const aiResponseContent = lastMessage.content;
     
     // Add assistant message to chat
     const assistantMessage = {
       role: 'assistant',
-      content: aiResponse,
+      content: aiResponseContent,
       timestamp: new Date()
     };
     

@@ -4,7 +4,7 @@ import { useAuth } from '../context/Auth';
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
-
+  console.log("auth")
   if (loading) {
     return <div className="flex justify-center items-center h-screen">Loading...</div>;
   }

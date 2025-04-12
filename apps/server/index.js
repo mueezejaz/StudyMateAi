@@ -2,11 +2,8 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import { db_connect } from "../../packages/shared/db.connect.js";
-import dotenv from 'dotenv'
 import errorHandler from "./utils/ErrorHandler.js";
-dotenv.config({
-    path:'./.env'
-})
+import Chatrouter from "./routes/route.chat.js";
 const app = express();
 
 // Middleware
@@ -25,6 +22,7 @@ import { setupWorker } from "./workers/ProcessingDoc.js";
 // Routes
 app.use("/api/user", UserRouter);
 app.use("/api/agent", AgentRouter);
+app.use("/api/chat", Chatrouter);
 app.use(errorHandler);
 
 app.get('/test', async(req, res) => {

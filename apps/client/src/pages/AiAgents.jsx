@@ -134,7 +134,7 @@ export default function AiAgents() {
                 <MessageSquare className="w-4 h-4" />
                 <span>Chat</span>
               </button>
-              <button onClick={() => navigate(`/aiagents/${agent._id}`)}  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded w-full sm:w-auto">
+              <button onClick={() => navigate(`/aiagents/addata/${agent._id}`)}  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded w-full sm:w-auto">
                 Add data
               </button>
               {isOwned && (
