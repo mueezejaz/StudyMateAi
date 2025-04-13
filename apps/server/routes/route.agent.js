@@ -29,7 +29,9 @@ AgentRouter.post("/unshare", unshareAgent);
 AgentRouter.get("/:agentId", getAgentById);
 AgentRouter.delete("/:agentId", deleteAgent);
 
+
 // File routes
+AgentRouter.get("/:agentId/files",  getFiles);
 AgentRouter.post("/:agentId/files", upload.array("files", 5), uploadFiles);
 AgentRouter.get("/:agentId/files", getFiles);
 AgentRouter.put("/files/status", updateFileStatus);

@@ -231,10 +231,11 @@ export const getChatById = async (req, res, next) => {
 // Send a message and get a response using LangGraph conversational RAG pattern
 // Send a message and get a response using LangGraph conversational RAG pattern
 // Send a message and get a response using LangGraph conversational RAG pattern
+// Send a message and get a response using file selection or vector search
 export const sendMessage = async (req, res, next) => {
   try {
     const { chatId } = req.params;
-    const { message } = req.body;
+    const { message, selectedFile } = req.body;
 
     if (!chatId || !message) {
       throw new ApiError(400, "Chat ID and message are required");
@@ -274,8 +275,69 @@ export const sendMessage = async (req, res, next) => {
       chat.threadId = threadId;
     }
 
-    // Define the retrieve function
-    const retrieve = async (state) => {
+    // Define context retrieval based on whether a file was selected
+    let retrievedDocs = [];
+    
+    if (selectedFile) {
+      // Find the file in the agent's files array by original name
+      const fileInfo = agent.files.find(file => file.originalName === selectedFile);
+      
+      if (!fileInfo) {
+        throw new ApiError(404, "Selected file not found for this agent");
+      }
+      
+      // Connect to MongoDB
+      const client = new MongoClient(env_config.get("MONGODB_ATLAS_URI"));
+      await client.connect();
+      
+      const collection = client
+        .db(env_config.get("MONGODB_ATLAS_DB_NAME"))
+        .collection(env_config.get("MONGODB_ATLAS_COLLECTION_NAME"));
+      
+      // Count how many documents we have for this file
+      const docCount = await collection.countDocuments({ 
+        fileName: fileInfo.filename,
+        agentId: agent._id.toString()
+      });
+      
+      // If document count exceeds model context window, use vector search on this file only
+      if (docCount > 20) { // Assuming each chunk is ~1000 tokens, and context window is ~16-20K
+        // Initialize embedding model
+        const embeddings = new GoogleGenerativeAIEmbeddings({
+          model: "text-embedding-004",
+          apiKey: env_config.get("GOOGLE_APPLICATION_CREDENTIALS"),
+        });
+        
+        // Initialize Vector Store
+        const vectorStore = new MongoDBAtlasVectorSearch(embeddings, {
+          collection,
+          indexName: "vector_index",
+          textKey: "text",
+          embeddingKey: "embedding",
+        });
+        
+        // Use the message to generate a better query
+        retrievedDocs = await vectorStore.similaritySearch(message, 5, {
+          fileName: fileInfo.filename,
+          agentId: agent._id.toString()
+        });
+      } else {
+        // Fetch all chunks for the specified file
+        const chunks = await collection.find({
+          fileName: fileInfo.filename,
+          agentId: agent._id.toString()
+        }).toArray();
+        console.log(chunks)
+        // Convert to document format
+        retrievedDocs = chunks.map(chunk => ({
+          pageContent: chunk.text,
+          metadata: chunk.metadata
+        }));
+      }
+      
+      await client.close();
+    } else {
+      // Use the standard vector search across all files
       try {
         const client = new MongoClient(env_config.get("MONGODB_ATLAS_URI"));
         await client.connect();
@@ -292,106 +354,90 @@ export const sendMessage = async (req, res, next) => {
 
         // Initialize Vector Store
         const vectorStore = new MongoDBAtlasVectorSearch(embeddings, {
-          collection: collection,
+          collection,
           indexName: "vector_index",
           textKey: "text",
           embeddingKey: "embedding",
         });
 
         // Use all messages to generate a better query
-        const queryString = state.messages.map(m => m.content).join(" ");
-        const retrievedDocs = await vectorStore.similaritySearch(queryString, 3,{agentId: agent._id.toString()});
+        const queryString = chat.messages.map(m => m.content).join(" ");
+        retrievedDocs = await vectorStore.similaritySearch(queryString, 3, {
+          "metadata.agentId": agent._id.toString()
+        });
 
         await client.close();
-
-        return { context: retrievedDocs };
       } catch (error) {
         console.error("Error retrieving context:", error);
-        return { context: [] };
+        retrievedDocs = [];
       }
-    };
+    }
 
     // Generate the final response with retrieved context
-    const generateResponse = async (state) => {
-      // Format retrieved context
-      const docsContent = state.context.map(doc => doc.pageContent).join("\n\n");
+    // Format retrieved context
+    const docsContent = retrievedDocs.map(doc => {
+      // Add source information if this is from a specifically selected file
+      let content = doc.pageContent;
+      if (selectedFile) {
+        content = `[From ${selectedFile}]: ${content}`;
+      }
+      console.log(content)
+      return content;
+    }).join("\n\n");
 
-      // Convert existing chat messages to LangChain format
-      const chatHistory = chat.messages.map(msg => {
-        if (msg.role === 'user') {
-          return new HumanMessage(msg.content);
-        } else if (msg.role === 'assistant') {
-          return new AIMessage(msg.content);
-        } else if (msg.role === 'system') {
-          return new SystemMessage(msg.content);
-        }
-        return null;
-      }).filter(msg => msg !== null);
-     console.log(docsContent) 
-      // Create system message with context and tone guidance
-      const systemMessageContent =
-        `You are a helpful AI assistant named ${agent.name}. ${agent.description || ''}\n\n` +
-        `Use the following retrieved information to answer the user's question:\n\n` +
-        `${docsContent}\n\n` +
-        `Important tone instructions:\n` +
-        `- Respond in a friendly, conversational manner\n` +
-        `When responding with math or logic expressions, format them using LaTeX syntax:\n` +
-        `- Use $$...$$ for block math (displayed on its own line)\n` +
-        `- Use \\overline{...} to represent NOT or negation with a bar over the entire expression\n` +
-        `- Use \\cdot for AND, and + for OR\n` +
-        `- Example:\n` +
-        `  \\overline{A + B} = \\overline{A} \\cdot \\overline{B} should be written as:\n` +
-        `  $$\\overline{A + B} = \\overline{A} \\cdot \\overline{B}$$\n\n` +
-        `- Use markdown formatting for better readability\n` +
-        `- Use proper heading hierarchy (# for main titles, ## for subtitles)\n` +
-        `- Format code blocks with the appropriate language for syntax highlighting\n` +
-        `- If showing math equations, use LaTeX formatting with $$ for block equations or $ for inline\n` +
-        `- Use bullet points and numbered lists when appropriate\n` +
-        `- Bold or italicize key points to improve readability\n` +
-        `- Keep your tone warm and helpful\n` +
-        `- Start with a greeting or acknowledgment of the user's question\n\n` +
-        `If you cannot find the answer in the retrieved information, say so politely.`;
+    // Convert existing chat messages to LangChain format
+    const chatHistory = chat.messages.map(msg => {
+      if (msg.role === 'user') {
+        return new HumanMessage(msg.content);
+      } else if (msg.role === 'assistant') {
+        return new AIMessage(msg.content);
+      }
+      return null;
+    }).filter(msg => msg !== null);
+    
+    // Create system message with context and tone guidance
+    let systemMessageContent = `You are a helpful AI assistant named ${agent.name}. ${agent.description || ''}\n\n`;
+    
+    // Add information about the selected file if applicable
+    if (selectedFile) {
+      systemMessageContent += `The user has specifically requested information from the file "${selectedFile}".\n\n`;
+    }
+    
+    systemMessageContent += 
+      `Use the following retrieved information to answer the user's question:\n\n` +
+      `${docsContent}\n\n` +
+      `Important tone instructions:\n` +
+      `- Respond in a friendly, conversational manner\n` +
+      `When responding with math or logic expressions, format them using LaTeX syntax:\n` +
+      `- Use $$...$$ for block math (displayed on its own line)\n` +
+      `- Use \\overline{...} to represent NOT or negation with a bar over the entire expression\n` +
+      `- Use \\cdot for AND, and + for OR\n` +
+      `- Example:\n` +
+      `  \\overline{A + B} = \\overline{A} \\cdot \\overline{B} should be written as:\n` +
+      `  $$\\overline{A + B} = \\overline{A} \\cdot \\overline{B}$$\n\n` +
+      `- Use markdown formatting for better readability\n` +
+      `- Use proper heading hierarchy (# for main titles, ## for subtitles)\n` +
+      `- Format code blocks with the appropriate language for syntax highlighting\n` +
+      `- If showing math equations, use LaTeX formatting with $$ for block equations or $ for inline\n` +
+      `- Use bullet points and numbered lists when appropriate\n` +
+      `- Bold or italicize key points to improve readability\n` +
+      `- Keep your tone warm and helpful\n` +
+      `- Start with a greeting or acknowledgment of the user's question\n\n` +
+      `If you cannot find the answer in the retrieved information, say so politely.`;
 
-      // Prepare messages for final response
-      const promptMessages = [
-        new SystemMessage(systemMessageContent),
-        ...chatHistory
-      ];
-
-      // Generate the final response including the previous messages
-      const response = await llm.invoke(promptMessages);
-
-      return { messages: [response] };
-    };
-
-    // Set up LangGraph workflow
-    const annotation = Annotation.Root({
-      messages: Annotation,
-      context: Annotation
-    });
-
-    // Build a simpler graph with just retrieve and generate
-    const graphBuilder = new StateGraph(annotation)
-      .addNode("retrieve", retrieve)
-      .addNode("generateResponse", generateResponse)
-      .addEdge("__start__", "retrieve")
-      .addEdge("retrieve", "generateResponse")
-      .addEdge("generateResponse", "__end__");
-
-    // Compile the graph
-    const workflow = graphBuilder.compile();
-
-    // Convert user message to LangChain format
-    const input = {
-      messages: [new HumanMessage(message)]
-    };
-
-    // Execute the workflow
-    const result = await workflow.invoke(input);
+    // Prepare messages for final response
+    const currentMessage = [ new SystemMessage(systemMessageContent) ,userMessage]
+    const promptMessages = [
+      new SystemMessage(systemMessageContent),
+      ...chatHistory,
+      userMessage,
+    ];
+    console.log(promptMessages)
+    // Generate the final response including the previous messages
+    const response = await llm.invoke(promptMessages);
 
     // Extract the final AI response
-    const lastMessage = result.messages[result.messages.length - 1];
-    const aiResponseContent = lastMessage.content;
+    const aiResponseContent = response.content;
 
     // Add assistant message to chat
     const assistantMessage = {
