@@ -21,8 +21,59 @@ const apiService = {
   sendMessage: (chatId, message) => axios.post(`${API_BASE_URL}/chat/${chatId}/message`, { message }, { withCredentials: true }),
   updateChatTitle: (chatId, title) => axios.patch(`${API_BASE_URL}/chat/${chatId}/title`, { title }, { withCredentials: true }),
   deleteChat: (chatId) => axios.delete(`${API_BASE_URL}/chat/${chatId}`, { withCredentials: true }),
+ sendMessage: (chatId, message, selectedFile = null) => 
+    axios.post(
+      `${API_BASE_URL}/chat/${chatId}/message`, 
+      { message, selectedFile }, 
+      { withCredentials: true }
+    ),
 };
-
+// Add this component to display file selection options
+const FileSelector = ({ files, onSelectFile, selectedFile }) => {
+  const [showDropdown, setShowDropdown] = useState(false);
+  
+  return (
+    <div className="relative">
+      <button 
+        onClick={() => setShowDropdown(!showDropdown)}
+        className="flex items-center gap-2 text-sm px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded-md"
+      >
+        <span>{selectedFile ? selectedFile : "Select file"}</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </button>
+      
+      {showDropdown && (
+        <div className="absolute z-10 mt-1 w-56 bg-gray-800 rounded-md shadow-lg">
+          <div className="py-1">
+            <button
+              onClick={() => {
+                onSelectFile(null);
+                setShowDropdown(false);
+              }}
+              className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-700"
+            >
+              Use normal search
+            </button>
+            {files.map((file) => (
+              <button
+                key={file._id}
+                onClick={() => {
+                  onSelectFile(file.originalName);
+                  setShowDropdown(false);
+                }}
+                className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-700"
+              >
+                {file.originalName}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 // Message Component
 const Message = React.memo(({ message }) => {
   return message.role === 'user' ? (
@@ -135,7 +186,8 @@ const Chat = () => {
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const textareaRef = useRef(null);
-
+const [agentFiles, setAgentFiles] = useState([]);
+const [selectedFile, setSelectedFile] = useState(null);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -163,7 +215,16 @@ const Chat = () => {
     
     setShouldAutoScroll(isNearBottom);
   }, []);
-
+const fetchAgentFiles = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/agent/${agentid}/files`, { 
+      withCredentials: true 
+    });
+    setAgentFiles(response.data.data.files || []);
+  } catch (error) {
+    console.error("Error fetching agent files:", error);
+  }
+};
   // Add scroll event listener
   useEffect(() => {
     const container = messagesContainerRef.current;
@@ -209,17 +270,21 @@ const Chat = () => {
 
   // Load initial chat data
   useEffect(() => {
-    fetchChats().then(() => {
-      if (chatid) {
-        setCurrentChatId(chatid);
-        fetchChat(chatid).then(() => {
-          setMessagesLoaded(true);
-          // After loading chat, scroll to bottom
-          setTimeout(scrollToBottom, 100);
-        });
-      }
-    });
-  }, [agentid, chatid]);
+  fetchChats().then(() => {
+    if (chatid) {
+      setCurrentChatId(chatid);
+      fetchChat(chatid).then(() => {
+        setMessagesLoaded(true);
+        setTimeout(scrollToBottom, 100);
+      });
+    }
+    
+    // Fetch agent files
+    if (agentid) {
+      fetchAgentFiles();
+    }
+  });
+}, [agentid, chatid]);
 
   // Click outside to close any menus
   useEffect(() => {
@@ -293,53 +358,56 @@ const Chat = () => {
   };
 
   // Send message handler
-  const handleSend = async () => {
-    if (input.trim() === "") return;
+// Update the handleSend function to include selectedFile
+const handleSend = async () => {
+  if (input.trim() === "") return;
+  
+  const userMessage = { role: "user", content: input, timestamp: new Date() };
+  setMessages(prev => [...prev, userMessage]);
+  setInput("");
+  setLoading(true);
+  setShouldAutoScroll(true);
+  
+  try {
+    // Create a new chat if needed
+    let chatIdToUse = currentChatId;
     
-    const userMessage = { role: "user", content: input, timestamp: new Date() };
-    setMessages(prev => [...prev, userMessage]);
-    setInput("");
-    setLoading(true);
-    setShouldAutoScroll(true); // Force scroll to bottom when user sends a message
-    
-    try {
-      // Create a new chat if needed
-      let chatIdToUse = currentChatId;
+    if (!chatIdToUse) {
+      const createResponse = await apiService.createChat(
+        agentid,
+        input.slice(0, 30)
+      );
       
-      if (!chatIdToUse) {
-        const createResponse = await apiService.createChat(
-          agentid,
-          input.slice(0, 30) // Use first part of message as title
-        );
-        
-        chatIdToUse = createResponse.data.data.chat._id;
-        setCurrentChatId(chatIdToUse);
-        setChatTitle(createResponse.data.data.chat.title);
-        
-        // Update URL
-        navigate(`/aiagents/${agentid}/chat/${chatIdToUse}`);
-      }
+      chatIdToUse = createResponse.data.data.chat._id;
+      setCurrentChatId(chatIdToUse);
+      setChatTitle(createResponse.data.data.chat.title);
       
-      // Send message
-      const response = await apiService.sendMessage(chatIdToUse, input);
-      const aiMessage = response.data.data.message;
-      
-      setMessages(prev => [...prev, aiMessage]);
-      
-      // Refresh chat list
-      fetchChats();
-      
-    } catch (error) {
-      console.error("Error sending message:", error);
-      toast.error("Failed to send message");
-      // Remove the user message if sending failed
-      setMessages(prev => prev.slice(0, -1));
-    } finally {
-      setLoading(false);
-      // Ensure we scroll to bottom after message is sent and received
-      setTimeout(scrollToBottom, 100);
+      navigate(`/aiagents/${agentid}/chat/${chatIdToUse}`);
     }
-  };
+    
+    // Send message with selected file if any
+    const response = await apiService.sendMessage(
+      chatIdToUse, 
+      input, 
+      selectedFile // Pass the selected file name
+    );
+    
+    const aiMessage = response.data.data.message;
+    
+    setMessages(prev => [...prev, aiMessage]);
+    
+    // Refresh chat list
+    fetchChats();
+    
+  } catch (error) {
+    console.error("Error sending message:", error);
+    toast.error("Failed to send message");
+    setMessages(prev => prev.slice(0, -1));
+  } finally {
+    setLoading(false);
+    setTimeout(scrollToBottom, 100);
+  }
+};
 
   // Create new chat
   const createNewChat = async () => {
@@ -473,7 +541,7 @@ const Chat = () => {
         <div 
           ref={messagesContainerRef}
           className="flex-1 overflow-y-auto overflow-x-hidden p-4 bg-gray-900"
-          style={{ position: 'absolute', top: '49px', bottom: '80px', left: 0, right: 0 }}
+style={{ position: 'absolute', top: '49px', bottom: '112px', left: 0, right: 0 }}
         >
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center px-4">
@@ -522,8 +590,17 @@ const Chat = () => {
           </button>
         )}
 
-        {/* Input area */}
-        <div className="p-4 bg-gray-800 border-t border-gray-700 absolute bottom-0 left-0 right-0">
+{/* Add this before the Input area */}
+<div className="p-2 bg-gray-800 border-t border-gray-700 absolute bottom-[80px] left-0 right-0 flex justify-center">
+  <FileSelector 
+    files={agentFiles.filter(file => file.status === 'completed')} 
+    onSelectFile={setSelectedFile}
+    selectedFile={selectedFile}
+  />
+</div>
+
+{/* Update the Input area's positioning to account for the file selector */}
+<div className="p-4 bg-gray-800 border-t border-gray-700 absolute bottom-0 left-0 right-0">
           <div className="flex items-center relative">
             <textarea
               ref={textareaRef}
