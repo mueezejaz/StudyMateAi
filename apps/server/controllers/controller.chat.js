@@ -300,7 +300,7 @@ export const sendMessage = async (req, res, next) => {
 
         // Use all messages to generate a better query
         const queryString = state.messages.map(m => m.content).join(" ");
-        const retrievedDocs = await vectorStore.similaritySearch(queryString, 3);
+        const retrievedDocs = await vectorStore.similaritySearch(queryString, 3,{agentId: agent._id.toString()});
 
         await client.close();
 
