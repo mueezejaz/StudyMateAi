@@ -8,9 +8,12 @@ import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 import { MongoDBAtlasVectorSearch } from "@langchain/mongodb";
 import { v4 as uuidv4 } from "uuid";
 import env_config from "../config/env.config.js";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { pull } from "langchain/hub";
 import { 
   MessagesAnnotation, 
   StateGraph, 
+  Annotation,
   MemorySaver,
 } from "@langchain/langgraph";
 import { 
@@ -38,12 +41,39 @@ const checkpointer = new MemorySaver();
 
 // Define the retrieve tool
 const retrieveSchema = z.object({ query: z.string() });
+const retrieve = async (state) => {
+  console.log(state)
+      const client = new MongoClient(env_config.get("MONGODB_ATLAS_URI"));
+        await client.connect();
+        
+        const collection = client
+          .db(env_config.get("MONGODB_ATLAS_DB_NAME"))
+          .collection(env_config.get("MONGODB_ATLAS_COLLECTION_NAME"));
+        
+        // Initialize embedding model
+        const embeddings = new GoogleGenerativeAIEmbeddings({
+          model: "text-embedding-004",
+          apiKey:env_config.get("GOOGLE_APPLICATION_CREDENTIALS"), 
+        });
 
-const buildRetrieveTool = (agentId) => {
-  return tool(
+        // Initialize Vector Store
+        const vectorStore = new MongoDBAtlasVectorSearch(embeddings, {
+          collection: collection,
+          indexName: "vector_index",
+          textKey: "text",
+          embeddingKey: "embedding",
+        });
+const queryString = state.messages.map(m => m.content).join(" ");
+const retrievedDocs = await vectorStore.similaritySearch(queryString,3);
+
+state.context = retrievedDocs
+  return { context: retrievedDocs };
+};
+const buildRetrieveTool = tool(
     async ({ query }) => {
       try {
         // Connect to MongoDB Atlas Vector Database
+       console.log(query) 
         const client = new MongoClient(env_config.get("MONGODB_ATLAS_URI"));
         await client.connect();
         
@@ -67,9 +97,9 @@ const buildRetrieveTool = (agentId) => {
         
         // Perform similarity search with filter for this agent
         const retrievedDocs = await vectorStore.similaritySearch(query, 3, {
-          agentId: agentId.toString()
+          // agentId: agentId.toString()
         });
-        
+       console.log(retrievedDocs) 
         await client.close();
         
         // Format the results
@@ -89,7 +119,7 @@ const buildRetrieveTool = (agentId) => {
       schema: retrieveSchema,
     }
   );
-};
+
 
 // Create a new chat
 export const createChat = async (req, res, next) => {
@@ -243,37 +273,21 @@ export const sendMessage = async (req, res, next) => {
     }
     
     // Create the retrieve tool for this agent
-    const retrieveTool = buildRetrieveTool(chat.agentId);
+    // const retrieveTool = buildRetrieveTool(chat.agentId);
     
     // Define the LangGraph workflow nodes
     
     // Step 1: Generate an AIMessage that may include a tool-call
     const queryOrRespond = async (state) => {
-      // Get chat history from messages
-      const chatHistory = convertToLangChainMessages(chat.messages);
-      
-      // System prompt with agent instructions
-      const systemMessage = new SystemMessage(
-        `You are a helpful AI assistant named ${agent.name}. ${agent.description || ''}\n` +
-        `Answer questions based on the knowledge you have access to through the retrieve tool.\n` +
-        `If you cannot find the answer, say so politely. Be concise but thorough.\n` +
-        `Always use the retrieve tool when the user asks something that requires specific information.`
-      );
-      
-      // Bind the retrieve tool to the LLM
-      const llmWithTools = llm.bindTools([retrieveTool]);
-      
-      // Prepare the message list with system message and chat history
-      const messages = [systemMessage, ...chatHistory];
-      
-      // Call the LLM with tools
-      const response = await llmWithTools.invoke(messages);
-      
-      return { messages: [response] };
+const llmWithTools = llm.bindTools([buildRetrieveTool]);
+  const response = await llmWithTools.invoke(state.messages);
+  // MessagesState appends messages to state instead of overwriting
+  console.log(response)
+  return { messages: [response] };
     };
     
     // Step 2: Execute the retrieval
-    const tools = new ToolNode([retrieveTool]);
+    const tools = new ToolNode([buildRetrieveTool]);
     
     // Step 3: Generate the final response with retrieved context
     const generateResponse = async (state) => {
@@ -308,27 +322,40 @@ export const sendMessage = async (req, res, next) => {
         ...chatHistory
       ];
       
+const promptTemplate = await pull("rlm/rag-prompt");
       // Generate the final response
-      const response = await llm.invoke(promptMessages);
-      
+      console.log("state is this",state)
+      const docsContent = state.context.map(doc => doc.pageContent).join("\n");
+      const messages = await promptTemplate.invoke({ question: state.question, context: docsContent });
+      let propt = [
+        new SystemMessage(docsContent),
+         ...state.messages,
+      ]
+      console.log("this is propt message", propt )
+      const response = await llm.invoke(propt);
       return { messages: [response] };
     };
-    
+    const annotationm = Annotation.Root({
+      messages:Annotation,
+      context:Annotation
+    })
     // Build the graph - using the conversational RAG pattern from the tutorial
-    const graphBuilder = new StateGraph(MessagesAnnotation)
-      .addNode("queryOrRespond", queryOrRespond)
-      .addNode("tools", tools)
+    const graphBuilder = new StateGraph(annotationm)
+      .addNode("retrieve", retrieve)
+      // .addNode("queryOrRespond", queryOrRespond)
+      // .addNode("tools", tools)
       .addNode("generateResponse", generateResponse)
-      .addEdge("__start__", "queryOrRespond")
-      .addConditionalEdges("queryOrRespond", toolsCondition, {
-        "__end__": "__end__",
-        "tools": "tools",
-      })
-      .addEdge("tools", "generateResponse")
+      .addEdge("__start__", "retrieve")
+      // .addEdge("queryOrRespond", "tools")
+      // .addConditionalEdges("queryOrRespond", toolsCondition, {
+      //   "__end__": "__end__",
+      //   "tools": "tools",
+      // })
+      .addEdge("retrieve", "generateResponse")
       .addEdge("generateResponse", "__end__");
     
     // Compile the graph with the memory checkpointer
-    const workflow = graphBuilder.compile({ checkpointer });
+    const workflow = graphBuilder.compile();
     
     // Set up config with thread ID
     const config = { 
@@ -342,7 +369,7 @@ export const sendMessage = async (req, res, next) => {
     };
     
     // Execute the workflow
-    const result = await workflow.invoke(input, config);
+    const result = await workflow.invoke(input);
     
     // Extract the final AI response
     const lastMessage = result.messages[result.messages.length - 1];

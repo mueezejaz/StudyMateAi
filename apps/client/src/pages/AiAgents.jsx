@@ -4,12 +4,14 @@ import Navbar from "../components/NavBar";
 import axios from "axios";
 import { toast } from "react-hot-toast";
 import { useNavigate } from "react-router";
+
 export default function AiAgents() {
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showNewAgentModal, setShowNewAgentModal] = useState(false);
   const [newAgent, setNewAgent] = useState({ name: "", description: "" });
   const [currentUserId, setCurrentUserId] = useState(null);
+  const navigate = useNavigate();
 
   // Fetch agents when component mounts
   useEffect(() => {
@@ -96,11 +98,37 @@ export default function AiAgents() {
     }
   };
 
+  // Function to create a new chat and navigate to it
+  const handleStartChat = async (agentId) => {
+    try {
+      setLoading(true);
+      // Create a new chat for this agent
+      const response = await axios.post(
+        "http://localhost:8000/api/chat/create",
+        {
+          agentId: agentId,
+          title: "New Chat"
+        },
+        { withCredentials: true }
+      );
+      
+      const newChatId = response.data.data.chat._id;
+      
+      // Navigate to the chat page
+      navigate(`/aiagents/${agentId}/chat/${newChatId}`);
+      
+    } catch (error) {
+      console.error("Error starting chat:", error);
+      toast.error("Failed to start chat");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Separate agents into owned and shared
   const myAgents = agents.filter(agent => agent.admin?._id === currentUserId);
   const sharedWithMe = agents.filter(agent => agent.admin?._id !== currentUserId);
 
-        const navigate = useNavigate();
   const renderAgentsList = (agentsList, isOwned) => {
     return (
       <div className="space-y-4">
@@ -130,7 +158,10 @@ export default function AiAgents() {
               </div>
             </div>
             <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 w-full sm:w-auto mt-4 sm:mt-0">
-              <button className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded w-full sm:w-auto flex items-center justify-center space-x-2">
+              <button
+                onClick={() => handleStartChat(agent._id)}
+                className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded w-full sm:w-auto flex items-center justify-center space-x-2"
+              >
                 <MessageSquare className="w-4 h-4" />
                 <span>Chat</span>
               </button>

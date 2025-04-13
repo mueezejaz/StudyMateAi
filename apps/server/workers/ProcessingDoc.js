@@ -9,6 +9,7 @@ import fs from 'fs';
 import { Document } from "@langchain/core/documents";
 import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 import path from "path";
+import env_config from "../config/env.config.js";
 
 // === Utility Functions ===
 
@@ -42,7 +43,7 @@ function deleteFile(filePath) {
 // === Document Processing Functions ===
 
 async function processPDFDocument(agentId, filePath, originalFileName) {
-  const apiKey = process.env.MISTRAL_API_KEY;
+  const apiKey = env_config.get("MISTRAL_API_KEY");
   if (!apiKey) throw new Error("MISTRAL_API_KEY not defined");
 
   const clientMistral = new Mistral({ apiKey });
@@ -59,12 +60,21 @@ async function processPDFDocument(agentId, filePath, originalFileName) {
     model: "mistral-ocr-latest",
     document: { type: "document_url", documentUrl: signedUrl.url }
   });
-
-  const splitter = new RecursiveCharacterTextSplitter({ chunkSize: 1000, chunkOverlap: 200 });
+function cleanText(text) {
+  return text
+    .replace(/\s+/g, " ")       // Collapse multiple spaces
+    .replace(/[^\S\r\n]+/g, " ") // Remove non-visible whitespace
+    .trim();
+}
+const splitter = new RecursiveCharacterTextSplitter({
+  chunkSize: 2000,
+  chunkOverlap: 400,
+  separators: ["\n\n", "\n", ".", "!", "?", ",", " "]
+});
   let allSplits = [];
 
   for (const page of ocrResponse.pages || []) {
-    const pageText = page.markdown || page.text || "";
+    const pageText = cleanText( page.markdown || page.text || "" )
     if (!pageText.trim()) continue;
 
     const metadata = { pageNumber: page.index, agentId, originalFileName, fileName };
@@ -76,16 +86,16 @@ async function processPDFDocument(agentId, filePath, originalFileName) {
 
   if (allSplits.length === 0) throw new Error("No text extracted");
 
-  const client = new MongoClient(process.env.MONGODB_ATLAS_URI);
+  const client = new MongoClient(env_config.get("MONGODB_ATLAS_URI"));
   await client.connect();
 
   const collection = client
-    .db(process.env.MONGODB_ATLAS_DB_NAME)
-    .collection(process.env.MONGODB_ATLAS_COLLECTION_NAME);
+    .db(env_config.get("MONGODB_ATLAS_DB_NAME"))
+    .collection(env_config.get("MONGODB_ATLAS_COLLECTION_NAME"));
 
   const embeddings = new GoogleGenerativeAIEmbeddings({
     model: "text-embedding-004",
-    apiKey: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    apiKey: env_config.get("GOOGLE_APPLICATION_CREDENTIALS"),
     taskType: TaskType.RETRIEVAL_DOCUMENT,
     title: fileName,
   });
@@ -108,7 +118,7 @@ async function processPDFDocument(agentId, filePath, originalFileName) {
 }
 
 async function processImageDocument(agentId, filePath, originalFileName) {
-  const apiKey = process.env.MISTRAL_API_KEY;
+  const apiKey = env_config.get("MISTRAL_API_KEY");
   if (!apiKey) throw new Error("MISTRAL_API_KEY not defined");
 
   const clientMistral = new Mistral({ apiKey });
@@ -142,16 +152,16 @@ async function processImageDocument(agentId, filePath, originalFileName) {
 
   if (allSplits.length === 0) throw new Error("No text extracted from image");
 
-  const client = new MongoClient(process.env.MONGODB_ATLAS_URI);
+  const client = new MongoClient(env_config.get("MONGODB_ATLAS_URI"));
   await client.connect();
 
   const collection = client
-    .db(process.env.MONGODB_ATLAS_DB_NAME)
-    .collection(process.env.MONGODB_ATLAS_COLLECTION_NAME);
+    .db(env_config.get("MONGODB_ATLAS_DB_NAME"))
+    .collection(env_config.get("MONGODB_ATLAS_COLLECTION_NAME"));
 
   const embeddings = new GoogleGenerativeAIEmbeddings({
     model: "text-embedding-004",
-    apiKey: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    apiKey: env_config.get("GOOGLE_APPLICATION_CREDENTIALS"),
     taskType: TaskType.RETRIEVAL_DOCUMENT,
     title: fileName,
   });
@@ -180,7 +190,7 @@ const setupWorker = async () => {
   queue.removeAllListeners('succeeded');
 
   queue.on('failed', (job, err) => {
-    console.error(`Job ${job.id} failed with error: ${message}`);
+    console.error(`Job ${job.id} failed with error: ${err}`);
   });
 
   queue.on('succeeded', (job, result) => {
@@ -190,6 +200,7 @@ const setupWorker = async () => {
   queue.process(2, async (job) => {
     const { agentId, filePath, fileType, filename, orignalFileName } = job.data;
     try {
+      console.log("start process",orignalFileName)
       const statusUpdated = await updateFileStatus(agentId, filename, "processing");
       if (!statusUpdated) throw new Error("Failed to update file status");
 
@@ -216,5 +227,8 @@ const setupWorker = async () => {
 };
 
 export { setupWorker };
+
+
+
 
 
