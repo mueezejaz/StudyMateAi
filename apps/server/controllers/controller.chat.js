@@ -1,4 +1,4 @@
-import Chat from "../models/model.chat.js";
+  import Chat from "../models/model.chat.js";
 import Agent from "../models/model.agent.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponce.js";
@@ -362,8 +362,8 @@ export const sendMessage = async (req, res, next) => {
 
         // Use all messages to generate a better query
         const queryString = chat.messages.map(m => m.content).join(" ");
-        retrievedDocs = await vectorStore.similaritySearch(queryString, 3, {
-          "metadata.agentId": agent._id.toString()
+        retrievedDocs = await vectorStore.similaritySearch(message, 3, {
+          agentId: agent._id.toString()
         });
 
         await client.close();
@@ -402,7 +402,7 @@ export const sendMessage = async (req, res, next) => {
     if (selectedFile) {
       systemMessageContent += `The user has specifically requested information from the file "${selectedFile}".\n\n`;
     }
-    
+   console.log(docsContent) 
     systemMessageContent += 
       `Use the following retrieved information to answer the user's question:\n\n` +
       `${docsContent}\n\n` +

@@ -1,7 +1,7 @@
 import Bee from 'bee-queue';
 import Redis from "ioredis"
-
-const redisUrl = process.env.RADIS_URI; // Get this from Upstash console
+import env_config from "../config/env.config.js"
+const redisUrl = env_config.get("RADIS_URI"); // Get this from Upstash console
 console.log(redisUrl)
 console.log(redisUrl)
 const GetQueue  = async ()=>{
