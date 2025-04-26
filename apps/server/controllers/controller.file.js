@@ -68,16 +68,14 @@ export const uploadFiles = async (req, res, next) => {
     // adding file to the queue 
         for (const file of req.files) {
         if (Queue) {
-          const job = Queue.createJob({
+          await Queue.add("file",{
           agentId: agent._id.toString(),
           filePath: file.path,
           fileType: "pdf",
           filename: file.filename,
           orignalFileName:file.originalname
-        });
+        },{removeOnComplete:true, removeOnFail:true});
         
-        await job.save();
-        console.log(`Job ${job.id} created for file ${file.filename}`);
       } else {
         console.warn("Queue not available, file will not be processed automatically");
       }

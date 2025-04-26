@@ -1,5 +1,6 @@
 import queue from "../utils/Queue.js";
 import Agent from "../models/model.agent.js";
+import { Worker } from "bullmq";
 import { Mistral } from '@mistralai/mistralai';
 import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 import { TaskType } from "@google/generative-ai";
@@ -60,21 +61,21 @@ async function processPDFDocument(agentId, filePath, originalFileName) {
     model: "mistral-ocr-latest",
     document: { type: "document_url", documentUrl: signedUrl.url }
   });
-function cleanText(text) {
-  return text
-    .replace(/\s+/g, " ")       // Collapse multiple spaces
-    .replace(/[^\S\r\n]+/g, " ") // Remove non-visible whitespace
-    .trim();
-}
-const splitter = new RecursiveCharacterTextSplitter({
-  chunkSize: 2000,
-  chunkOverlap: 400,
-  separators: ["\n\n", "\n", ".", "!", "?", ",", " "]
-});
+  function cleanText(text) {
+    return text
+      .replace(/\s+/g, " ")       // Collapse multiple spaces
+      .replace(/[^\S\r\n]+/g, " ") // Remove non-visible whitespace
+      .trim();
+  }
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 2000,
+    chunkOverlap: 400,
+    separators: ["\n\n", "\n", ".", "!", "?", ",", " "]
+  });
   let allSplits = [];
 
   for (const page of ocrResponse.pages || []) {
-    const pageText = cleanText( page.markdown || page.text || "" )
+    const pageText = cleanText(page.markdown || page.text || "")
     if (!pageText.trim()) continue;
 
     const metadata = { pageNumber: page.index, agentId, originalFileName, fileName };
@@ -181,26 +182,10 @@ async function processImageDocument(agentId, filePath, originalFileName) {
 // === Worker Setup ===
 
 const setupWorker = async () => {
-  if (!queue) {
-    console.error("Queue is not available. Worker setup failed.");
-    return false;
-  }
-
-  queue.removeAllListeners('failed');
-  queue.removeAllListeners('succeeded');
-
-  queue.on('failed', (job, err) => {
-    console.error(`Job ${job.id} failed with error: ${err}`);
-  });
-
-  queue.on('succeeded', (job, result) => {
-    console.log(`Job ${job.id} completed:`, result);
-  });
-
-  queue.process(2, async (job) => {
+  const worker = new Worker("fileProcessing", async job => {
     const { agentId, filePath, fileType, filename, orignalFileName } = job.data;
     try {
-      console.log("start process",orignalFileName)
+      console.log("start process", orignalFileName)
       const statusUpdated = await updateFileStatus(agentId, filename, "processing");
       if (!statusUpdated) throw new Error("Failed to update file status");
 
@@ -220,10 +205,23 @@ const setupWorker = async () => {
       deleteFile(filePath);
       throw error;
     }
+  }, {
+    connection: {
+      host: "creative-aardvark-40124.upstash.io",
+      port: 6379,
+      password: "AZy8AAIjcDE0OGJkMjYxNGY5OWU0MjhiOGVjZjI0YzhjOWZkNjY1OHAxMA",
+      tls: {}
+    },
+    concurrency:5,
+  })
+
+  worker.on('failed', (job, error) => {
+    console.error(`Job ${job.id} failed with error: ${err}`);
   });
 
-  console.log("File processing worker setup complete");
-  return true;
+  worker.on('completed', async (job) => {
+    console.log(`Job ${job.id} completed:`);
+  });
 };
 
 export { setupWorker };
